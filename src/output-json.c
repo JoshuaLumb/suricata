@@ -1,4 +1,4 @@
-/* Copyright (C) 2007-2018 Open Information Security Foundation
+/* Copyright (C) 2007-2020 Open Information Security Foundation
  *
  * You can copy, redistribute or modify this Program under the terms of
  * the GNU General Public License version 2 as published by the Free
@@ -135,21 +135,81 @@ json_t *SCJsonString(const char *val)
 /* Default Sensor ID value */
 static int64_t sensor_id = -1; /* -1 = not defined */
 
-/**
- * \brief Create a JSON string from a character sequence
- *
- * \param Pointer to character sequence
- * \param Number of characters to use from the sequence
- * \retval JSON object for the character sequence
- */
-json_t *JsonAddStringN(const char *string, size_t size)
+void EveFileInfo(JsonBuilder *jb, const File *ff, const bool stored)
 {
-    char tmpbuf[size + 1];
+    jb_set_string_from_bytes(jb, "filename", ff->name, ff->name_len);
 
-    memcpy(tmpbuf, string, size);
-    tmpbuf[size] = '\0';
+    jb_open_array(jb, "sid");
+    for (uint32_t i = 0; ff->sid != NULL && i < ff->sid_cnt; i++) {
+        jb_append_uint(jb, ff->sid[i]);
+    }
+    jb_close(jb);
 
-    return SCJsonString(tmpbuf);
+#ifdef HAVE_MAGIC
+    if (ff->magic)
+        jb_set_string(jb, "magic", (char *)ff->magic);
+#endif
+    jb_set_bool(jb, "gaps", ff->flags & FILE_HAS_GAPS);
+    switch (ff->state) {
+        case FILE_STATE_CLOSED:
+            JB_SET_STRING(jb, "state", "CLOSED");
+#ifdef HAVE_NSS
+            if (ff->flags & FILE_MD5) {
+                size_t x;
+                int i;
+                char str[256];
+                for (i = 0, x = 0; x < sizeof(ff->md5); x++) {
+                    i += snprintf(&str[i], 255-i, "%02x", ff->md5[x]);
+                }
+                jb_set_string(jb, "md5", str);
+            }
+            if (ff->flags & FILE_SHA1) {
+                size_t x;
+                int i;
+                char str[256];
+                for (i = 0, x = 0; x < sizeof(ff->sha1); x++) {
+                    i += snprintf(&str[i], 255-i, "%02x", ff->sha1[x]);
+                }
+                jb_set_string(jb, "sha1", str);
+            }
+#endif
+            break;
+        case FILE_STATE_TRUNCATED:
+            JB_SET_STRING(jb, "state", "TRUNCATED");
+            break;
+        case FILE_STATE_ERROR:
+            JB_SET_STRING(jb, "state", "ERROR");
+            break;
+        default:
+            JB_SET_STRING(jb, "state", "UNKNOWN");
+            break;
+    }
+
+#ifdef HAVE_NSS
+    if (ff->flags & FILE_SHA256) {
+        size_t x;
+        int i;
+        char str[256];
+        for (i = 0, x = 0; x < sizeof(ff->sha256); x++) {
+            i += snprintf(&str[i], 255-i, "%02x", ff->sha256[x]);
+        }
+        jb_set_string(jb, "sha256", str);
+    }
+#endif
+
+    if (stored) {
+        JB_SET_TRUE(jb, "stored");
+        jb_set_uint(jb, "file_id", ff->file_store_id);
+    } else {
+        JB_SET_FALSE(jb, "stored");
+    }
+
+    jb_set_uint(jb, "size", FileTrackedSize(ff));
+    if (ff->end > 0) {
+        jb_set_uint(jb, "start", ff->start);
+        jb_set_uint(jb, "end", ff->end);
+    }
+    jb_set_uint(jb, "tx_id", ff->txid);
 }
 
 static void JsonAddPacketvars(const Packet *p, json_t *js_vars)
@@ -700,21 +760,21 @@ void JsonTcpFlags(uint8_t flags, json_t *js)
 void EveTcpFlags(const uint8_t flags, JsonBuilder *js)
 {
     if (flags & TH_SYN)
-        jb_set_bool(js, "syn", true);
+        JB_SET_TRUE(js, "syn");
     if (flags & TH_FIN)
-        jb_set_bool(js, "fin", true);
+        JB_SET_TRUE(js, "fin");
     if (flags & TH_RST)
-        jb_set_bool(js, "rst", true);
+        JB_SET_TRUE(js, "rst");
     if (flags & TH_PUSH)
-        jb_set_bool(js, "psh", true);
+        JB_SET_TRUE(js, "psh");
     if (flags & TH_ACK)
-        jb_set_bool(js, "ack", true);
+        JB_SET_TRUE(js, "ack");
     if (flags & TH_URG)
-        jb_set_bool(js, "urg", true);
+        JB_SET_TRUE(js, "urg");
     if (flags & TH_ECN)
-        jb_set_bool(js, "ecn", true);
+        JB_SET_TRUE(js, "ecn");
     if (flags & TH_CWR)
-        jb_set_bool(js, "cwr", true);
+        JB_SET_TRUE(js, "cwr");
 }
 
 void JsonAddrInfoInit(const Packet *p, enum OutputJsonLogDirection dir, JsonAddrInfo *addr)

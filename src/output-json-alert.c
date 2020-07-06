@@ -146,13 +146,15 @@ static void AlertJsonSsh(const Flow *f, JsonBuilder *js)
 {
     void *ssh_state = FlowGetAppState(f);
     if (ssh_state) {
+        JsonBuilderMark mark = { 0, 0, 0 };
         void *tx_ptr = rs_ssh_state_get_tx(ssh_state, 0);
-        json_t *tjs = rs_ssh_log_json(tx_ptr);
-        if (unlikely(tjs == NULL))
-            return;
-
-        jb_set_jsont(js, "ssh", tjs);
-        json_decref(tjs);
+        jb_get_mark(js, &mark);
+        jb_open_object(js, "ssh");
+        if (rs_ssh_log_json(tx_ptr, js)) {
+            jb_close(js);
+        } else {
+            jb_restore_mark(js, &mark);
+        }
     }
 
     return;
@@ -411,7 +413,6 @@ static int AlertJson(ThreadVars *tv, JsonAlertLogThread *aft, const Packet *p)
 {
     MemBuffer *payload = aft->payload_buffer;
     AlertJsonOutputCtx *json_output_ctx = aft->json_output_ctx;
-    json_t *hjs = NULL;
 
     int i;
 
@@ -529,10 +530,12 @@ static int AlertJson(ThreadVars *tv, JsonAlertLogThread *aft, const Packet *p)
                     }
                     break;
                 case ALPROTO_SMB:
-                    hjs = JsonSMBAddMetadata(p->flow, pa->tx_id);
-                    if (hjs) {
-                        jb_set_jsont(jb, "smb", hjs);
-                        json_decref(hjs);
+                    jb_get_mark(jb, &mark);
+                    jb_open_object(jb, "smb");
+                    if (EveSMBAddMetadata(p->flow, pa->tx_id, jb)) {
+                        jb_close(jb);
+                    } else {
+                        jb_restore_mark(jb, &mark);
                     }
                     break;
                 case ALPROTO_SIP:
@@ -546,11 +549,7 @@ static int AlertJson(ThreadVars *tv, JsonAlertLogThread *aft, const Packet *p)
                     break;
                 }
                 case ALPROTO_FTPDATA:
-                    hjs = JsonFTPDataAddMetadata(p->flow);
-                    if (hjs) {
-                        jb_set_jsont(jb, "ftp-data", hjs);
-                        json_decref(hjs);
-                    }
+                    EveFTPDataAddMetadata(p->flow, jb);
                     break;
                 case ALPROTO_DNP3:
                     AlertJsonDnp3(p->flow, pa->tx_id, jb);
@@ -560,6 +559,31 @@ static int AlertJson(ThreadVars *tv, JsonAlertLogThread *aft, const Packet *p)
                     break;
                 default:
                     break;
+            }
+        }
+
+        /* including fileinfo data is configured by the metadata setting */
+        if (json_output_ctx->flags & LOG_JSON_RULE_METADATA) {
+            FileContainer *ffc = AppLayerParserGetFiles(p->flow,
+                    p->flowflags & FLOW_PKT_TOSERVER ? STREAM_TOSERVER:STREAM_TOCLIENT);
+            if (ffc != NULL) {
+                File *file = ffc->head;
+                bool isopen = false;
+                while (file) {
+                    if (pa->tx_id == file->txid) {
+                        if (!isopen) {
+                            isopen = true;
+                            jb_open_array(jb, "fileinfo");
+                        }
+                        jb_start_object(jb);
+                        EveFileInfo(jb, file, file->flags & FILE_STORED);
+                        jb_close(jb);
+                    }
+                    file = file->next;
+                }
+                if (isopen) {
+                    jb_close(jb);
+                }
             }
         }
 

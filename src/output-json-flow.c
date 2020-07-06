@@ -239,7 +239,7 @@ static void EveFlowLogJSON(JsonFlowLogThread *aft, JsonBuilder *jb, Flow *f)
     jb_set_uint(jb, "age", age);
 
     if (f->flow_end_flags & FLOW_END_FLAG_EMERGENCY)
-        jb_set_bool(jb, "emergency", true);
+        JB_SET_TRUE(jb, "emergency");
     const char *state = NULL;
     if (f->flow_end_flags & FLOW_END_FLAG_STATE_NEW)
         state = "new";
@@ -252,11 +252,11 @@ static void EveFlowLogJSON(JsonFlowLogThread *aft, JsonBuilder *jb, Flow *f)
         int flow_state = SC_ATOMIC_GET(f->flow_state);
         switch (flow_state) {
             case FLOW_STATE_LOCAL_BYPASSED:
-                jb_set_string(jb, "bypass", "local");
+                JB_SET_STRING(jb, "bypass", "local");
                 break;
 #ifdef CAPTURE_OFFLOAD
             case FLOW_STATE_CAPTURE_BYPASSED:
-                jb_set_string(jb, "bypass", "capture");
+                JB_SET_STRING(jb, "bypass", "capture");
                 break;
 #endif
             default:
@@ -280,7 +280,7 @@ static void EveFlowLogJSON(JsonFlowLogThread *aft, JsonBuilder *jb, Flow *f)
 
     jb_set_bool(jb, "alerted", FlowHasAlerts(f));
     if (f->flags & FLOW_WRONG_THREAD)
-        jb_set_bool(jb, "wrong_thread", true);
+        JB_SET_TRUE(jb, "wrong_thread");
 
     /* Close flow. */
     jb_close(jb);
@@ -350,9 +350,9 @@ static void EveFlowLogJSON(JsonFlowLogThread *aft, JsonBuilder *jb, Flow *f)
             }
             jb_set_string(jb, "state", tcp_state);
             if (ssn->client.flags & STREAMTCP_STREAM_FLAG_GAP)
-                jb_set_bool(jb, "gap_ts", true);
+                JB_SET_TRUE(jb, "gap_ts");
             if (ssn->server.flags & STREAMTCP_STREAM_FLAG_GAP)
-                jb_set_bool(jb, "gap_tc", true);
+                JB_SET_TRUE(jb, "gap_tc");
         }
 
         /* Close tcp. */

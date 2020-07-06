@@ -164,7 +164,10 @@ impl JsonBuilder {
                 self.pop_state();
                 Ok(self)
             }
-            _ => Err(JsonError::InvalidState),
+            State::None => {
+                debug_validate_fail!("invalid state");
+                Err(JsonError::InvalidState)
+            },
         }
     }
 
@@ -226,6 +229,7 @@ impl JsonBuilder {
                 self.buf.push_str(",\"");
             }
             _ => {
+                debug_validate_fail!("invalid state");
                 return Err(JsonError::InvalidState);
             }
         }
@@ -247,6 +251,7 @@ impl JsonBuilder {
                 self.buf.push(',');
             }
             _ => {
+                debug_validate_fail!("invalid state");
                 return Err(JsonError::InvalidState);
             }
         }
@@ -268,6 +273,7 @@ impl JsonBuilder {
                 self.buf.push(',');
             }
             _ => {
+                debug_validate_fail!("invalid state");
                 return Err(JsonError::InvalidState);
             }
         }
@@ -292,7 +298,10 @@ impl JsonBuilder {
                 self.encode_string(val)?;
                 Ok(self)
             }
-            _ => Err(JsonError::InvalidState),
+            _ => {
+                debug_validate_fail!("invalid state");
+                Err(JsonError::InvalidState)
+            }
         }
     }
 
@@ -313,6 +322,7 @@ impl JsonBuilder {
                 self.buf.push(',');
             }
             _ => {
+                debug_validate_fail!("invalid state");
                 return Err(JsonError::InvalidState);
             }
         }
@@ -329,6 +339,7 @@ impl JsonBuilder {
                 self.set_state(State::ObjectNth);
             }
             _ => {
+                debug_validate_fail!("invalid state");
                 return Err(JsonError::InvalidState);
             }
         }
@@ -352,6 +363,7 @@ impl JsonBuilder {
                 self.buf.push(',');
             }
             _ => {
+                debug_validate_fail!("invalid state");
                 return Err(JsonError::InvalidState);
             }
         }
@@ -365,7 +377,10 @@ impl JsonBuilder {
         match self.current_state() {
             State::ObjectNth => self.buf.push(','),
             State::ObjectFirst => self.set_state(State::ObjectNth),
-            _ => return Err(JsonError::InvalidState),
+            _ => {
+                debug_validate_fail!("invalid state");
+                return Err(JsonError::InvalidState);
+            }
         }
         self.buf.push('"');
         self.buf.push_str(key);
@@ -395,6 +410,7 @@ impl JsonBuilder {
                 self.set_state(State::ObjectNth);
             }
             _ => {
+                debug_validate_fail!("invalid state");
                 return Err(JsonError::InvalidState);
             }
         }
@@ -402,6 +418,23 @@ impl JsonBuilder {
         self.buf.push_str(key);
         self.buf.push_str("\":");
         self.encode_string(val)?;
+        Ok(self)
+    }
+
+    pub fn set_formatted(&mut self, formatted: &str) -> Result<&mut Self, JsonError> {
+        match self.current_state() {
+            State::ObjectNth => {
+                self.buf.push(',');
+            }
+            State::ObjectFirst => {
+                self.set_state(State::ObjectNth);
+            }
+            _ => {
+                debug_validate_fail!("invalid state");
+                return Err(JsonError::InvalidState);
+            }
+        }
+        self.buf.push_str(formatted);
         Ok(self)
     }
 
@@ -423,6 +456,7 @@ impl JsonBuilder {
                 self.set_state(State::ObjectNth);
             }
             _ => {
+                debug_validate_fail!("invalid state");
                 return Err(JsonError::InvalidState);
             }
         }
@@ -442,6 +476,7 @@ impl JsonBuilder {
                 self.set_state(State::ObjectNth);
             }
             _ => {
+                debug_validate_fail!("invalid state");
                 return Err(JsonError::InvalidState);
             }
         }
@@ -554,7 +589,7 @@ pub extern "C" fn jb_clone(js: &mut JsonBuilder) -> *mut JsonBuilder {
 
 #[no_mangle]
 pub unsafe extern "C" fn jb_free(js: &mut JsonBuilder) {
-    let _: Box<JsonBuilder> = std::mem::transmute(js);
+    let _ = Box::from_raw(js);
 }
 
 #[no_mangle]
@@ -606,6 +641,28 @@ pub unsafe extern "C" fn jb_set_string(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn jb_set_string_from_bytes(
+    js: &mut JsonBuilder, key: *const c_char, bytes: *const u8, len: u32,
+) -> bool {
+    if bytes == std::ptr::null() || len == 0 {
+        return false;
+    }
+    if let Ok(key) = CStr::from_ptr(key).to_str() {
+        let val = std::slice::from_raw_parts(bytes, len as usize);
+        return js.set_string_from_bytes(key, val).is_ok();
+    }
+    return false;
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn jb_set_formatted(js: &mut JsonBuilder, formatted: *const c_char) -> bool {
+    if let Ok(formatted) = CStr::from_ptr(formatted).to_str() {
+        return js.set_formatted(formatted).is_ok();
+    }
+    return false;
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn jb_set_jsont(
     jb: &mut JsonBuilder, key: *const c_char, jsont: &mut json::JsonT,
 ) -> bool {
@@ -639,6 +696,17 @@ pub unsafe extern "C" fn jb_append_string(js: &mut JsonBuilder, val: *const c_ch
         return js.append_string(val).is_ok();
     }
     return false;
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn jb_append_string_from_bytes(
+    js: &mut JsonBuilder, bytes: *const u8, len: u32,
+) -> bool {
+    if bytes == std::ptr::null() || len == 0 {
+        return false;
+    }
+    let val = std::slice::from_raw_parts(bytes, len as usize);
+    return js.append_string_from_bytes(val).is_ok();
 }
 
 #[no_mangle]
@@ -950,6 +1018,17 @@ mod test {
         assert_eq!(jb.buf, r#"{"foo":"bar""#);
         assert_eq!(jb.current_state(), State::ObjectNth);
         assert_eq!(jb.state.len(), 2);
+    }
+
+    #[test]
+    fn test_set_formatted() {
+        let mut jb = JsonBuilder::new_object();
+        jb.set_formatted("\"foo\":\"bar\"").unwrap();
+        assert_eq!(jb.buf, r#"{"foo":"bar""#);
+        jb.set_formatted("\"bar\":\"foo\"").unwrap();
+        assert_eq!(jb.buf, r#"{"foo":"bar","bar":"foo""#);
+        jb.close().unwrap();
+        assert_eq!(jb.buf, r#"{"foo":"bar","bar":"foo"}"#);
     }
 }
 

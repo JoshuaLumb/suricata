@@ -992,37 +992,29 @@ static int SigParseAction(Signature *s, const char *action)
 {
     if (strcasecmp(action, "alert") == 0) {
         s->action = ACTION_ALERT;
-        return 0;
     } else if (strcasecmp(action, "drop") == 0) {
         s->action = ACTION_DROP;
-        return 0;
     } else if (strcasecmp(action, "pass") == 0) {
         s->action = ACTION_PASS;
-        return 0;
-    } else if (strcasecmp(action, "reject") == 0) {
+    } else if (strcasecmp(action, "reject") == 0 ||
+               strcasecmp(action, "rejectsrc") == 0)
+    {
         if (!(SigParseActionRejectValidate(action)))
             return -1;
         s->action = ACTION_REJECT|ACTION_DROP;
-        return 0;
-    } else if (strcasecmp(action, "rejectsrc") == 0) {
-        if (!(SigParseActionRejectValidate(action)))
-            return -1;
-        s->action = ACTION_REJECT|ACTION_DROP;
-        return 0;
     } else if (strcasecmp(action, "rejectdst") == 0) {
         if (!(SigParseActionRejectValidate(action)))
             return -1;
         s->action = ACTION_REJECT_DST|ACTION_DROP;
-        return 0;
     } else if (strcasecmp(action, "rejectboth") == 0) {
         if (!(SigParseActionRejectValidate(action)))
             return -1;
         s->action = ACTION_REJECT_BOTH|ACTION_DROP;
-        return 0;
     } else {
         SCLogError(SC_ERR_INVALID_ACTION,"An invalid action \"%s\" was given",action);
         return -1;
     }
+    return 0;
 }
 
 /**
@@ -1845,7 +1837,8 @@ static int SigValidate(DetectEngineCtx *de_ctx, Signature *s)
     }
 #endif
 
-    if ((s->flags & SIG_FLAG_FILESTORE) || s->file_flags != 0) {
+    if ((s->flags & SIG_FLAG_FILESTORE) || s->file_flags != 0 ||
+        (s->init_data->init_flags & SIG_FLAG_INIT_FILEDATA)) {
         if (s->alproto != ALPROTO_UNKNOWN &&
                 !AppLayerParserSupportsFiles(IPPROTO_TCP, s->alproto))
         {
